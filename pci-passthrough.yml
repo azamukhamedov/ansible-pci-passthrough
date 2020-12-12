@@ -1,0 +1,58 @@
+---
+
+- hosts: all
+
+  tasks:
+
+#Configure IOMMU
+  - name: Verify the GRUB defauts and modify the GRUB configuration if required
+    lineinfile:
+      path: /etc/default/grub
+      backrefs: true
+      regexp: '^GRUB_CMDLINE_LINUX=^'
+      line: 'GRUB_CMDLINE_LINUX="crashkernel=auto intel_iommu=on iommu=pt rd.driver.blacklist=nouveau"'
+    become: yes
+    register: grubfile
+    tags:
+      - grub
+
+#Configure VFIO
+  - name: Configure the VFIO
+    shell:
+      cmd: touch /etc/modules-load.d/vfio.conf
+      warn: false
+    become: yes
+
+  - name: Modify the VFIO configuration
+    copy:
+      dest: /etc/modules-load.d/vfio.conf
+      content: |
+        vfio
+        vfio_iommu_type1
+        vfio_pci
+        vfio_virqfd
+    become: yes
+    tags:
+      - vfio
+
+#Update GRUB on UEFI systems
+  - name: Update the GRUB configuration
+    command: grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
+    become: yes
+
+#Reboot
+  - name: Reboot the target server
+    reboot:
+       msg: "The reboot of the server initiated by a remote user"
+       connect_timeout: 5
+       reboot_timeout: 600
+       pre_reboot_delay: 0
+       post_reboot_delay: 60
+       shell: dmesg | grep -i -e DMAR -e IOMMU
+    register: IOMMU
+    tags:
+      - reboot
+
+  - name: Confirm the IOMMU groups
+    debug:
+      var: IOMMU.stdout_lines
