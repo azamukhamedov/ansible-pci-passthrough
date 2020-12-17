@@ -4,26 +4,29 @@
 
   tasks:
 
-#Configure IOMMU
+#CPU vendor
+  - name: CPU vendor | Set facts
+    set_fact:
+      cpu_manufacturer: "{{ ansible_facts['processor'][1] | lower | regex_replace('(authentic)|(genuine)', '') }}"
+
+  - name: IOMMU/Nouveau | Set facts
+    set_fact:
+      grubconfig: '{{ cpu_manufacturer }}_iommu=on iommu=pt modprobe.blacklist=nouveau'
+
+#Configure IOMMU on KVM
   - name: Verify the GRUB defauts and modify the GRUB configuration if required
     lineinfile:
       path: /etc/default/grub
       backrefs: true
-      regexp: '^GRUB_CMDLINE_LINUX=^'
-      line: 'GRUB_CMDLINE_LINUX="crashkernel=auto intel_iommu=on iommu=pt rd.driver.blacklist=nouveau"'
+      regexp: '^(GRUB_CMDLINE_LINUX=(?!.*{{ grubconfig }})\"[^\"]+)(\")'
+      line: '\1 {{ grubconfig }}\2'
     become: yes
     register: grubfile
     tags:
       - grub
 
-#Configure VFIO
-  - name: Configure the VFIO
-    shell:
-      cmd: touch /etc/modules-load.d/vfio.conf
-      warn: false
-    become: yes
-
-  - name: Modify the VFIO configuration
+#Configure VFIO kernel module
+  - name: Configure and modify the VFIO configuration
     copy:
       dest: /etc/modules-load.d/vfio.conf
       content: |
@@ -35,24 +38,48 @@
     tags:
       - vfio
 
-#Update GRUB on UEFI systems
-  - name: Update the GRUB configuration
-    command: grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
+#Update GRUB on the system
+  - name: Update the GRUB configuration on UEFI/BIOS
+    shell: bash -c 'set -ex && EFI_GRUB_FN=$(readlink -f /etc/grub2-efi.cfg) && grub2-mkconfig -o "$EFI_GRUB_FN"'
     become: yes
 
-#Reboot
-  - name: Reboot the target server
-    reboot:
-       msg: "The reboot of the server initiated by a remote user"
-       connect_timeout: 5
-       reboot_timeout: 600
-       pre_reboot_delay: 0
-       post_reboot_delay: 60
-       shell: dmesg | grep -i -e DMAR -e IOMMU
-    register: IOMMU
+#Backup the current initramfs and build new one
+  - name: Backup the current intiramfs
+    shell: mv /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname  -r)-nouveau.img
+    become: yes
     tags:
-      - reboot
+      - intiramfs
 
-  - name: Confirm the IOMMU groups
-    debug:
-      var: IOMMU.stdout_lines
+  - name: Rebuild the new initramfs
+    shell: dracut /boot/initramfs-$(uname -r).img $(uname -r)
+    become: yes
+    tags:
+      - dracut
+
+#Reboot
+  - name: Reboot the target server immediately if there was a change
+    shell: "sleep 5 && reboot"
+    async: 1
+    poll: 0
+    when: grubfile is changed
+
+  - name: Wait for the reboot to complete if there was a change
+    wait_for_connection:
+      connect_timeout: 20
+      sleep: 5
+      delay: 5
+      timeout: 300
+    when: grubfile is changed
+
+#Perform the testing
+  - name: Confirm the IOMMU groups has been corretly enabled
+    shell: dmesg | grep -i -e DMAR -e IOMMU
+    register: iommu
+    failed_when:
+      - '"iommu=on" not in iommu.stdout'
+
+  - name: Confirm the VFIO has loaded and bound to the right devices
+    shell: dmesg | grep -i vfio
+    register: vfio
+    failed_when:
+      - '"vfio-pci" not in vfio.stdout'
