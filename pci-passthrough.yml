@@ -8,6 +8,9 @@
   - name: CPU vendor | Set facts
     set_fact:
       cpu_manufacturer: "{{ ansible_facts['processor'][1] | lower | regex_replace('(authentic)|(genuine)', '') }}"
+    failed_when:
+      -'"amd" not in cpu_manufacturer'
+      -'"intel" not in cpu_manufacturer'
 
   - name: IOMMU/Nouveau | Set facts
     set_fact:
@@ -43,15 +46,20 @@
     shell: bash -c 'set -ex && EFI_GRUB_FN=$(readlink -f /etc/grub2-efi.cfg) && grub2-mkconfig -o "$EFI_GRUB_FN"'
     become: yes
 
+#System information
+  - name: Get kernel release
+    command: uname -r
+    register: uname_r
+
 #Backup the current initramfs and build new one
   - name: Backup the current intiramfs
-    shell: mv /boot/initramfs-$(uname -r).img /boot/initramfs-$(uname  -r)-nouveau.img
+    shell: mv /boot/initramfs-{{ uname_r.stdout }}.img /boot/initramfs-{{ uname_r.stdout }}.nouveau.img
     become: yes
     tags:
       - intiramfs
 
   - name: Rebuild the new initramfs
-    shell: dracut /boot/initramfs-$(uname -r).img $(uname -r)
+    shell: dracut /boot/initramfs-{{ uname_r.stdout }}.img {{ uname_r.stdout }}
     become: yes
     tags:
       - dracut
@@ -73,13 +81,13 @@
 
 #Perform the testing
   - name: Confirm the IOMMU groups has been corretly enabled
-    shell: dmesg | grep -i -e DMAR -e IOMMU
+    shell: cat /proc/cmdline
     register: iommu
     failed_when:
       - '"iommu=on" not in iommu.stdout'
 
   - name: Confirm the VFIO has loaded and bound to the right devices
-    shell: dmesg | grep -i vfio
+    shell: lsmod | grep vfio
     register: vfio
     failed_when:
-      - '"vfio-pci" not in vfio.stdout'
+      - '"vfio" not in vfio.stdout'
