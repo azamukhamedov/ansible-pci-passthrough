@@ -43,12 +43,12 @@
 
 #Update GRUB on the system
   - name: Register the GRUB configuraiton on UEFI/BIOS
-    shell: readlink -f /etc/grub2-efi.cfg
+    command: readlink -f /etc/grub2-efi.cfg
     register: EFI_GRUB_FN
     become: yes
-  
+
   - name: Update the GRUB configufation on UEFI/BIOS
-    shell: grub2-mkconfig -o {{ EFI_GRUB_FN }}
+    command: grub2-mkconfig -o {{ EFI_GRUB_FN.stdout }}
     become: yes
 
 #System information
@@ -58,13 +58,13 @@
 
 #Backup the current initramfs and build new one
   - name: Backup the current intiramfs
-    shell: mv /boot/initramfs-{{ uname_r.stdout }}.img /boot/initramfs-{{ uname_r.stdout }}.nouveau.img
+    command: mv /boot/initramfs-{{ uname_r.stdout }}.img /boot/initramfs-{{ uname_r.stdout }}.nouveau.img
     become: yes
     tags:
       - intiramfs
 
   - name: Rebuild the new initramfs
-    shell: dracut /boot/initramfs-{{ uname_r.stdout }}.img {{ uname_r.stdout }}
+    command: dracut /boot/initramfs-{{ uname_r.stdout }}.img {{ uname_r.stdout }}
     become: yes
     tags:
       - dracut
@@ -86,7 +86,7 @@
 
 #Perform the testing
   - name: Confirm the IOMMU groups has been corretly enabled
-    shell: cat /proc/cmdline
+    command: cat /proc/cmdline
     register: iommu
     failed_when:
       - '"iommu=on" not in iommu.stdout'
