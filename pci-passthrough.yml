@@ -42,8 +42,13 @@
       - vfio
 
 #Update GRUB on the system
-  - name: Update the GRUB configuration on UEFI/BIOS
-    shell: bash -c 'set -ex && EFI_GRUB_FN=$(readlink -f /etc/grub2-efi.cfg) && grub2-mkconfig -o "$EFI_GRUB_FN"'
+  - name: Register the GRUB configuraiton on UEFI/BIOS
+    shell: readlink -f /etc/grub2-efi.cfg
+    register: EFI_GRUB_FN
+    become: yes
+  
+  - name: Update the GRUB configufation on UEFI/BIOS
+    shell: grub2-mkconfig -o {{ EFI_GRUB_FN }}
     become: yes
 
 #System information
